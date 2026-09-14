@@ -1,0 +1,37 @@
+# --- Terraform ---
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+crash.log
+crash.*.log
+tfplan
+*.tfplan
+tfplan.txt
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# --- local / secret variable files ---
+*.auto.tfvars
+secrets.tfvars
+*.tfvars.json
+.env
+
+# --- credentials, never commit ---
+.aws/
+credentials
+*.pem
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# NOTE: .terraform.lock.hcl and terraform.tfvars are intentionally
+# tracked. The lock file pins provider versions; the tfvars file holds
+# only non-secret configuration the CI pipeline needs.

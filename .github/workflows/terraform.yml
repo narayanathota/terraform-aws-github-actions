@@ -1,0 +1,187 @@
+name: Terraform AWS Infrastructure
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # required for OIDC — GitHub issues the token this job presents to AWS
+
+env:
+  AWS_REGION: ap-south-1
+  TF_VERSION: "1.13.3"
+  # FILL IN: the role ARN printed at the end of Phase 07, step 2.
+  # Not a secret — safe to commit.
+  AWS_ROLE_ARN: "arn:aws:iam::REPLACE-WITH-ACCOUNT-ID:role/REPLACE-WITH-YOUR-ROLE-NAME"
+
+jobs:
+  plan:
+    name: Format, Init, Validate, Plan
+    runs-on: ubuntu-latest
+
+    steps:
+      #  1. Checkout
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      #  2. Terraform Format
+      - name: Terraform Format
+        run: terraform fmt -check -recursive -diff
+
+      #  3. Terraform Init
+      - name: Terraform Init
+        run: terraform init -input=false
+
+      #  4. Terraform Validate
+      - name: Terraform Validate
+        run: terraform validate -no-color
+
+      #  5. Terraform Plan
+      - name: Terraform Plan
+        run: |
+          terraform plan -input=false -no-color -out=tfplan
+          terraform show -no-color tfplan > tfplan.txt
+
+      #  6. Upload Plan as Artifact
+      - name: Upload Plan Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan-${{ github.run_number }}
+          path: |
+            tfplan
+            tfplan.txt
+          retention-days: 7
+
+      - name: Publish plan to job summary
+        run: |
+          echo "## Terraform Plan (run ${{ github.run_number }})" >> $GITHUB_STEP_SUMMARY
+          echo '```terraform' >> $GITHUB_STEP_SUMMARY
+          head -c 50000 tfplan.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+  apply:
+    name: Apply (requires approval)
+    needs: plan
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    #  7. Manual Approval — this environment has a required reviewer
+    environment:
+      name: production
+      url: ${{ steps.outputs.outputs.app_url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Download approved plan
+        uses: actions/download-artifact@v4
+        with:
+          name: terraform-plan-${{ github.run_number }}
+
+      - name: Terraform Init
+        run: terraform init -input=false
+
+      #  8. Terraform Apply — applies the exact plan that was reviewed
+      - name: Terraform Apply
+        run: terraform apply -input=false -auto-approve tfplan
+
+      #  9. Terraform Outputs
+      - name: Terraform Outputs
+        id: outputs
+        run: |
+          terraform output -no-color
+
+          EIP=$(terraform output -raw elastic_ip)
+          APP_URL=$(terraform output -raw application_url)
+          echo "app_url=$APP_URL" >> $GITHUB_OUTPUT
+          echo "eip=$EIP" >> $GITHUB_OUTPUT
+
+          {
+            echo "## Deployment outputs"
+            echo ""
+            echo "| Output | Value |"
+            echo "| --- | --- |"
+            echo "| VPC ID | \`$(terraform output -raw vpc_id)\` |"
+            echo "| EC2 instance ID | \`$(terraform output -raw ec2_instance_id)\` |"
+            echo "| Elastic IP | \`$EIP\` |"
+            echo "| Application URL | $APP_URL |"
+            echo "| S3 bucket | \`$(terraform output -raw s3_bucket_name)\` |"
+            echo "| IAM role | \`$(terraform output -raw iam_role_name)\` |"
+            echo "| Security group | \`$(terraform output -raw security_group_id)\` |"
+          } >> $GITHUB_STEP_SUMMARY
+
+      # 10. Infrastructure Validation
+      - name: Infrastructure Validation
+        run: |
+          set -euo pipefail
+          EIP="${{ steps.outputs.outputs.eip }}"
+          IID=$(terraform output -raw ec2_instance_id)
+          BUCKET=$(terraform output -raw s3_bucket_name)
+          PROFILE=$(terraform output -raw iam_instance_profile_name)
+
+          echo "::group::EC2 instance state"
+          aws ec2 describe-instances --instance-ids "$IID" \
+            --query 'Reservations[0].Instances[0].{State:State.Name,Type:InstanceType,AZ:Placement.AvailabilityZone}' \
+            --output table
+          echo "::endgroup::"
+
+          echo "::group::S3 bucket security"
+          aws s3api get-bucket-versioning --bucket "$BUCKET"
+          aws s3api get-bucket-encryption --bucket "$BUCKET"
+          aws s3api get-public-access-block --bucket "$BUCKET"
+          echo "::endgroup::"
+
+          echo "::group::IAM instance profile"
+          aws iam get-instance-profile --instance-profile-name "$PROFILE" \
+            --query 'InstanceProfile.Roles[0].RoleName' --output text \
+            || echo "IAM read is restricted on this account - confirm the role from the EC2 console instead"
+          echo "::endgroup::"
+
+          echo "Waiting for the web server on http://$EIP"
+          UP=no
+          for i in $(seq 1 30); do
+            if curl -fsS --max-time 5 "http://$EIP" > /dev/null; then
+              UP=yes
+              echo "Web server answered on attempt $i"
+              break
+            fi
+            echo "attempt $i: not up yet, waiting 10s"
+            sleep 10
+          done
+
+          if [ "$UP" != "yes" ]; then
+            echo "VALIDATION FAILED - no response from http://$EIP after 5 minutes"
+            exit 1
+          fi
+
+          curl -sS "http://$EIP" | head -20
+          echo "VALIDATION PASSED - http://$EIP is serving the landing page"

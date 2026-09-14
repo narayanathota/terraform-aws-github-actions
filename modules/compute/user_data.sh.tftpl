@@ -1,0 +1,33 @@
+#!/bin/bash
+set -euxo pipefail
+
+dnf -y update
+dnf -y install nginx
+
+# IMDSv2 metadata for the landing page
+TOKEN=$(curl -sS -X PUT "http://169.254.169.254/latest/api/token" \
+  -H "X-aws-ec2-metadata-token-ttl-seconds: 300")
+IID=$(curl -sS -H "X-aws-ec2-metadata-token: $TOKEN" \
+  http://169.254.169.254/latest/meta-data/instance-id)
+AZONE=$(curl -sS -H "X-aws-ec2-metadata-token: $TOKEN" \
+  http://169.254.169.254/latest/meta-data/placement/availability-zone)
+
+cat > /usr/share/nginx/html/index.html <<HTML
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${project_name} — ${environment}</title></head>
+<body style="margin:0;min-height:100vh;display:grid;place-items:center;
+  font-family:system-ui,sans-serif;background:#0e1f1a;color:#dce8df">
+<main style="text-align:center;padding:40px">
+  <h1 style="margin:0 0 8px">Provisioned by Terraform</h1>
+  <p style="color:#6fd3a6;margin:0 0 28px">Applied through GitHub Actions</p>
+  <p>Project: ${project_name} &middot; Environment: ${environment}</p>
+  <p>Instance: $IID &middot; AZ: $AZONE</p>
+  <p>App bucket: ${bucket_name}</p>
+  <p style="color:#7e9a8d">Booted: $(date -u)</p>
+</main></body></html>
+HTML
+
+systemctl enable --now nginx

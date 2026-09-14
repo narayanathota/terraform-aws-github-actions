@@ -1,0 +1,4 @@
+# Keep shell/template scripts LF-only regardless of platform — they run
+# as bash on the EC2 instance, where CRLF causes cryptic failures.
+*.sh text eol=lf
+*.tftpl text eol=lf
