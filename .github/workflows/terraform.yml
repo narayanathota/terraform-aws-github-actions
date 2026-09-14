@@ -16,7 +16,7 @@ env:
   TF_VERSION: "1.13.3"
   # FILL IN: the role ARN printed at the end of Phase 07, step 2.
   # Not a secret — safe to commit.
-  AWS_ROLE_ARN: "arn:aws:iam::REPLACE-WITH-ACCOUNT-ID:role/REPLACE-WITH-YOUR-ROLE-NAME"
+  AWS_ROLE_ARN: "arn:aws:iam::598853839199:role/narayanathota-project03-gha-role"
 
 jobs:
   plan:
