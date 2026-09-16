@@ -9,14 +9,10 @@ on:
 
 permissions:
   contents: read
-  id-token: write # required for OIDC — GitHub issues the token this job presents to AWS
 
 env:
   AWS_REGION: ap-south-1
   TF_VERSION: "1.13.3"
-  # FILL IN: the role ARN printed at the end of Phase 07, step 2.
-  # Not a secret — safe to commit.
-  AWS_ROLE_ARN: "arn:aws:iam::598853839199:role/narayanathota-project03-gha-role"
 
 jobs:
   plan:
@@ -34,10 +30,11 @@ jobs:
           terraform_version: ${{ env.TF_VERSION }}
           terraform_wrapper: false
 
-      - name: Configure AWS credentials (OIDC)
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
       #  2. Terraform Format
@@ -96,10 +93,11 @@ jobs:
           terraform_version: ${{ env.TF_VERSION }}
           terraform_wrapper: false
 
-      - name: Configure AWS credentials (OIDC)
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Download approved plan

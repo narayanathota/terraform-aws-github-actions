@@ -32,11 +32,12 @@ terraform-aws-github-actions/
 ## Prerequisites
 
 - Terraform >= 1.10
-- AWS CLI (or AWS CloudShell)
-- An AWS account
-- A GitHub OIDC role trusted for this repo (see below) — no stored AWS secrets
+- AWS CLI
+- An AWS account, with an IAM user (programmatic access) whose access key
+  and secret key are stored as `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`
+  in this repo's GitHub Actions secrets
 
-## One-time bootstrap (run in AWS CloudShell)
+## One-time bootstrap
 
 ```bash
 REGION=ap-south-1
@@ -95,20 +96,22 @@ manual approval** (GitHub Environment `production`, required reviewer) →
 apply → print outputs → validate the live infrastructure end to end,
 including curling the Elastic IP until the web server answers.
 
-Authentication uses **GitHub OIDC**, not a stored AWS key: the workflow
-assumes an IAM role trusted only for this exact repository. No
-`AWS_ACCESS_KEY_ID` or secret exists anywhere in this repo or its settings.
+Authentication uses a dedicated IAM user's access key, stored as encrypted
+GitHub Actions secrets (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`) —
+never committed to the repository, and not visible in logs (GitHub masks
+secret values automatically).
 
 ## Security notes
 
-- No hardcoded credentials anywhere — GitHub Actions authenticates via OIDC
+- No credentials hardcoded in code — the AWS key lives only in GitHub's
+  encrypted Secrets store, referenced by name in the workflow
 - EC2 attached to a Terraform-created, least-privilege role: read/write on
   only its own S3 bucket, plus SSM (so port 22 stays closed by default)
 - IMDSv2 required on the instance; root volume encrypted
 - S3 bucket: versioning + AES-256 encryption + all public access blocked
 - Terraform state lives in S3, is encrypted, and is never committed to git
-- EC2 instance type and volume size are held within this AWS account's
-  policy limits (t2/t3 micro–large, ≤100GB gp2/gp3)
+- The CI IAM user is scoped to service-level policies (EC2/VPC/S3/IAM/SSM)
+  rather than `AdministratorAccess`
 
 ## Cleanup
 
