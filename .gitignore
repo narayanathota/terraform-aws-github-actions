@@ -25,6 +25,9 @@ secrets.tfvars
 .aws/
 credentials
 *.pem
+*access*key*.txt
+*secret*key*.txt
+*.key
 
 # --- OS / editor ---
 .DS_Store
